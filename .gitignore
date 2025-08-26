@@ -3,3 +3,4 @@ logs
 *.pyc
 tests
 pytest.ini
+data/tmp

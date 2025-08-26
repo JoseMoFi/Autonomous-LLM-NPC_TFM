@@ -7,6 +7,7 @@ import json
 
 from src.utils.logger import get_logger
 from src.world.items import ObjectManager, Gem, Shard, Relic, WorldObject
+from src.world.areas import AreaFactory, AreaManager
 
 log = get_logger("world.loader")
 
@@ -51,10 +52,10 @@ def load_world_from_json(
         blocked_cells.add(_as_cell(c))
 
     # 2) items
-    om = ObjectManager()
+    object_mgr = ObjectManager()
     for item_cfg in data.get("items", []):
         try:
-            om.add(_item_from_cfg(item_cfg))
+            object_mgr.add(_item_from_cfg(item_cfg))
         except Exception as e:
             log.warning(f"Item inválido {item_cfg!r}: {e}")
 
@@ -70,5 +71,16 @@ def load_world_from_json(
         except Exception as e:
             log.warning(f"No se pudo crear NPC {npc_cfg.get('id')!r}: {e}")
 
-    log.info(f"load_ok blocked={len(blocked_cells)} items={len(om.all())} npcs={len(npcs)} from={p}")
-    return blocked_cells, om, npcs
+    log.info(f"load_ok blocked={len(blocked_cells)} items={len(object_mgr.all())} npcs={len(npcs)} from={p}")
+
+    # 4) Areas
+    areas_cfg = data.get("areas", [])
+    areas = [AreaFactory.from_json(a) for a in areas_cfg]
+    area_mgr = AreaManager(areas)
+
+    if areas:
+        log.info(f"Cargadas {len(areas)} áreas: {[a.id for a in areas]}")
+    else:
+        log.info("No se definieron áreas en el JSON")
+
+    return blocked_cells, object_mgr, npcs, area_mgr

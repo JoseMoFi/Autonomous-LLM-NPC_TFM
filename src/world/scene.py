@@ -67,10 +67,13 @@ class GameWindow(arcade.Window):
                 )
                 return npc
 
-            bc, om, npcs = load_world_from_json(config_path, npc_factory=make_npc)
+            bc, om, npcs, am = load_world_from_json(config_path, npc_factory=make_npc)
             self.blocked_cells = bc
             self.objects = om
             self.npcs = npcs  # puede haber varios
+            self.area_mgr = am
+
+            self.show_areas = True
         else:
             # fallback: tu setup anterior (1 NPC e items demo)
             from src.world.items import Gem, Shard, Relic
@@ -102,14 +105,16 @@ class GameWindow(arcade.Window):
     def on_draw(self) -> None:
         self.clear()
         self._draw_grid()
+        self._draw_areas()
         self.blocked_sprites.draw()
+        self._draw_objects()
         self._draw_path_debug()
         self._draw_npcs()
         self._draw_hud()
-        self._draw_objects()
 
     def on_update(self, dt: float) -> None:
-        self.npcs[0].update(dt)
+        for npc in self.npcs:
+            npc.update(dt)
 
     # ---------- input ----------
     def on_mouse_motion(self, x: float, y: float, dx: float, dy: float) -> None:
@@ -155,6 +160,20 @@ class GameWindow(arcade.Window):
             self.show_path = not self.show_path
             state = "ON" if self.show_path else "OFF"
             self.log.info(f"[visual] Path visualization {state}")
+        # en on_key_press de GameWindow
+        elif symbol == arcade.key.G:
+            cell = self.npcs[0].current_cell() if hasattr(self, "npcs") else self.npc.current_cell()
+            npc = self.npcs[0] if hasattr(self, "npcs") else self.npc
+            ok = self.objects.pick_up_near(npc.id, cell)
+            self.log.info(f"pick_up_near at {cell}: {'OK' if ok else 'NOPE'}")
+
+        elif symbol == arcade.key.H:
+            cell = self.npcs[0].current_cell() if hasattr(self, "npcs") else self.npc.current_cell()
+            npc = self.npcs[0] if hasattr(self, "npcs") else self.npc
+            ok = self.objects.drop_held(npc.id, cell)
+            self.log.info(f"drop_held at {cell}: {'OK' if ok else 'NOPE'}")
+        elif symbol == arcade.key.A:
+            self.show_areas = not self.show_areas
 
     # ---------- dibujo ----------
     def _draw_grid(self) -> None:
@@ -185,3 +204,10 @@ class GameWindow(arcade.Window):
 
     def _draw_objects(self) -> None:
         self.objects.draw(self.g)
+
+    def _draw_areas(self) -> None:
+        if self.show_areas and getattr(self, "area_mgr", None):
+            # una sola llamada, sin saber de estilos ni kinds
+            from arcade import draw_text  # solo para evitar warnings del linter, no necesario
+            from src.world.settings import SETTINGS
+            self.area_mgr.draw_all(__import__("arcade"), SETTINGS.GRID_SIZE)

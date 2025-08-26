@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class WorldSettings:
     WIDTH: int = 1280
     HEIGHT: int = 720
-    GRID_SIZE: int = 32
+    GRID_SIZE: int = 24
     FPS: int = 60
 
 SETTINGS = WorldSettings()

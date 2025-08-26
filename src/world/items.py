@@ -83,22 +83,87 @@ class Relic(WorldObject):
 
 # --- Gestor simple de objetos ---
 
+from src.world.grid import neighbors_4  # ya lo tienes
+
 class ObjectManager:
     def __init__(self) -> None:
-        self._objects: List[WorldObject] = []
+        self._objects: list[WorldObject] = []
+        self._occupied: set[Cell] = set()  # celdas con objeto EN EL SUELO
 
+    # --- internos ---
+    def _rebuild_occupancy(self) -> None:
+        self._occupied = {o.cell for o in self._objects if o.held_by is None}
+
+    def _mark_add(self, obj: WorldObject) -> None:
+        if obj.held_by is None:
+            if obj.cell in self._occupied:
+                raise ValueError(f"Ya hay un objeto en {obj.cell}")
+            self._occupied.add(obj.cell)
+
+    def _mark_remove(self, obj: WorldObject) -> None:
+        if obj.held_by is None:
+            self._occupied.discard(obj.cell)
+
+    # --- API ---
     def add(self, *objs: WorldObject) -> None:
-        self._objects.extend(objs)
+        for o in objs:
+            self._objects.append(o)
+            self._mark_add(o)
 
     def remove(self, obj: WorldObject) -> None:
+        self._mark_remove(obj)
         self._objects = [o for o in self._objects if o is not obj]
 
-    def all(self) -> List[WorldObject]:
+    def all(self) -> list[WorldObject]:
         return list(self._objects)
 
     def draw(self, grid_size: int) -> None:
         for o in self._objects:
             o.draw(grid_size)
 
-    def objects_at_cell(self, cell: Cell) -> List[WorldObject]:
+    def objects_at_cell(self, cell: Cell) -> list[WorldObject]:
         return [o for o in self._objects if o.held_by is None and o.cell == cell]
+
+    def is_free(self, cell: Cell) -> bool:
+        return cell not in self._occupied
+
+    # --- reglas pedidas ---
+    def pickable_near(self, agent_cell: Cell) -> list[WorldObject]:
+        """Objetos cogibles en misma celda o adyacentes 4-dir."""
+        cands: list[WorldObject] = []
+        scan = [agent_cell, *neighbors_4(agent_cell)]
+        for c in scan:
+            for o in self._objects:
+                if o.held_by is None and o.cell == c:
+                    cands.append(o)
+        return cands
+
+    def pick_up_near(self, agent_id: str, agent_cell: Cell) -> bool:
+        """Intenta coger el primero disponible en radio 4-dir (incluida la celda)."""
+        for o in self.pickable_near(agent_cell):
+            if o.pick_up(agent_id):
+                # sale del suelo -> libera su celda
+                self._occupied.discard(o.cell)
+                return True
+        return False
+
+    def drop_held(self, agent_id: str, cell: Cell) -> bool:
+        """
+        Suelta la PRIMERA pieza que lleve el agente en 'cell' si esa celda está libre.
+        """
+        if not self.is_free(cell):
+            # ya hay pieza en esa celda
+            get_logger("world.objects").info(f"drop_blocked agent={agent_id} cell={cell}")
+            return False
+        for o in self._objects:
+            if o.held_by == agent_id:
+                o.held_by = None
+                o.cell = cell
+                self._occupied.add(cell)
+                get_logger("world.objects").info(f"drop_ok id={o.id} agent={agent_id} cell={cell}")
+                return True
+        return False
+
+    # utilidad por si tocas estados a mano
+    def sync(self) -> None:
+        self._rebuild_occupancy()
