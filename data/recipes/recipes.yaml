@@ -1,0 +1,5 @@
+bread:
+  inputs: { wheat: 2 }
+  outputs: { bread: 1 }
+  time_per_unit: 2.0
+  station: BakeryArea

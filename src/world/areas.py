@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Iterable, Dict, Type
 
+from src.world.settings import SETTINGS
+
 Cell = Tuple[int, int]
 Rect = Tuple[int, int, int, int]  # (x1, y1, x2, y2) inclusivo
+
+CELL_SIZE = SETTINGS.GRID_SIZE
 
 # ----------------------------
 # Estilo y helpers de dibujo
@@ -31,6 +35,11 @@ def _cell_rect_to_px(rect: Rect, cell_px: int) -> Tuple[float, float, float, flo
 def _rgba(rgb: Tuple[int, int, int], a: int) -> Tuple[int, int, int, int]:
     r, g, b = rgb
     return (r, g, b, a)
+
+def _tint(rgb: Tuple[int, int, int], factor: float) -> Tuple[int, int, int]:
+    """factor>1.0 aclara, 0<factor<1.0 oscurece."""
+    r, g, b = rgb
+    return (min(int(r*factor), 255), min(int(g*factor), 255), min(int(b*factor), 255))
 
 # ---------------------------------
 # Clases de área (rectangulares)
@@ -60,6 +69,7 @@ class RectArea:
         self.entrances = set(entrances or [])
         self.anchor = anchor
         self._label_cache = {}  # dict[int cell_px -> arcade.Text]
+        
     def _label_center_px(self, cell_px: int):
         ax, ay = self.anchor if self.anchor else self._bbox_center_cell()
         return (ax + 0.5) * cell_px, (ay + 0.5) * cell_px
@@ -99,6 +109,13 @@ class RectArea:
                     if c not in seen:
                         seen.add(c); yield c
 
+    def perimeter_block_cells(self) -> Iterable[Cell]:
+        """Perímetro no transitable = perímetro - entradas."""
+        entrances = set(self.entrances)
+        for c in self.perimeter_cells():
+            if c not in entrances:
+                yield c
+
     def bbox(self) -> Rect:
         xs1, ys1, xs2, ys2 = [], [], [], []
         for x1, y1, x2, y2 in self.rects:
@@ -108,9 +125,6 @@ class RectArea:
     # --- dibujo (sin contaminar scene) ---
 
     def draw(self, arcade, cell_px: int) -> None:
-        """
-        Dibuja el área (relleno + borde + etiqueta). 'arcade' es el módulo inyectado.
-        """
         st = type(self).STYLE
         # Relleno
         for rect in self.rects:
@@ -120,13 +134,17 @@ class RectArea:
         for rect in self.rects:
             l, r, b, t = _cell_rect_to_px(rect, cell_px)
             arcade.draw_lrbt_rectangle_outline(l, r, b, t, _rgba(st.border_rgb, st.border_alpha), st.border_px)
-        # Etiqueta (en anchor si existe; si no, en el centro de la bbox)
-        # Etiqueta cacheada
+        # Entradas: resáltalas con un tono más claro del fill
+        entrance_color = _tint(st.fill_rgb, 1.3)  # 30% más claro
+        for (cx, cy) in self.entrances:
+            l = cx * cell_px
+            r = (cx + 1) * cell_px
+            b = cy * cell_px
+            t = (cy + 1) * cell_px
+            arcade.draw_lrbt_rectangle_filled(l, r, b, t, _rgba(entrance_color, max(80, st.fill_alpha)))
+            arcade.draw_lrbt_rectangle_outline(l, r, b, t, _rgba(st.border_rgb, st.border_alpha), 2)
+        # Etiqueta (cacheada)
         self._get_label(arcade, cell_px).draw()
-
-    def _bbox_center_cell(self) -> Cell:
-        x1, y1, x2, y2 = self.bbox()
-        return ((x1 + x2) // 2, (y1 + y2) // 2)
 
 # -----------------------
 # Subclases tipadas
@@ -141,7 +159,7 @@ class BakeryArea(RectArea):
         border_alpha=200,
         border_px=2,
         label_color=(0, 0, 0),
-        label_px=12,
+        label_px=CELL_SIZE,
     )
 
 class BarArea(RectArea):
@@ -153,7 +171,7 @@ class BarArea(RectArea):
         border_alpha=200,
         border_px=2,
         label_color=(0, 0, 0),
-        label_px=12,
+        label_px=CELL_SIZE,
     )
 
 class FarmArea(RectArea):  # cultivo
@@ -165,7 +183,7 @@ class FarmArea(RectArea):  # cultivo
         border_alpha=200,
         border_px=2,
         label_color=(0, 0, 0),
-        label_px=12,
+        label_px=CELL_SIZE,
     )
 
 # ---------------------------------
@@ -225,3 +243,10 @@ class AreaManager:
     def draw_all(self, arcade, cell_px: int) -> None:
         for a in self._areas.values():
             a.draw(arcade, cell_px)
+    
+    # NUEVO: celdas bloqueadas de perímetro (union de todas las áreas)
+    def perimeter_blocked_cells(self) -> set[Cell]:
+        out: set[Cell] = set()
+        for a in self._areas.values():
+            out.update(a.perimeter_block_cells())
+        return out

@@ -5,7 +5,12 @@ from typing import Callable, Optional
 from src.world.grid import to_cell, Cell
 from src.world.pathfinding import GridSpec, astar
 from src.world.movement import GridMover
+from src.world.recipe import RecipeRegistry
+from src.world.items import ObjectManager
+from src.world.areas import AreaManager
 from src.utils.logger import get_logger
+from agent.inventory import Inventory
+from agent.crafting import Crafter, CraftError
 
 
 class NPCAgent:
@@ -21,19 +26,34 @@ class NPCAgent:
         agent_id: str,
         grid_size: int,
         grid_spec_provider: Callable[[], GridSpec],
+        object_mgr: ObjectManager,
+        area_mgr: AreaManager,
         speed_cells_per_sec: float = 4.0,
-        initial_cell: Optional[Cell] = (1, 1)
+        initial_cell: Optional[Cell] = (1, 1),
+        recipe_registry: RecipeRegistry | None = None,
+        **kwargs
     ) -> None:
         self.id = agent_id
         self.grid_size = grid_size
         self._grid_spec_provider = grid_spec_provider
         self.mover = GridMover(grid_size=grid_size, speed_cells_per_sec=speed_cells_per_sec)
 
+        self.object_mgr = object_mgr
+        self.area_mgr = area_mgr
+
         self.log_file = f"logs/agents/{agent_id}.log"
         self.log = get_logger(f"agent.{agent_id}", self.log_file)
 
         if initial_cell is not None:
             self.spawn_at(initial_cell)
+        
+        self.inventory = Inventory()
+        self.known_recipes: set[str] = set()
+        if recipe_registry is None:
+            from pathlib import Path
+            recipe_registry = RecipeRegistry.from_yaml(str(Path("data/recipes/recipes.yaml")))
+        # crafter
+        self.crafter = Crafter(self, recipe_registry, self.known_recipes, self.inventory)
 
     # ----- estado
     def world_position(self) -> tuple[float, float]:
@@ -75,12 +95,19 @@ class NPCAgent:
         self.mover.set_path([])
         self.log.info("action=stop")
 
+    def craft_object(self, object):
+        # TODO: hacer la llamada al crafter para hacer X objeto
+        pass
+
     def update(self, dt: float) -> None:
         prev_cell = self.current_cell()
         prev_target = self.mover.target_cell()
         self.mover.update(dt)
         new_cell = self.current_cell()
         new_target = self.mover.target_cell()
+
+        if prev_cell != new_cell:
+            self.set_current_area_name
 
         # log cuando avanza de celda
         if new_cell != prev_cell:
@@ -90,3 +117,18 @@ class NPCAgent:
         # log de llegada (cuando ya no hay target)
         if prev_target is not None and new_target is None and self.is_idle():
             self.log.info(f"action=arrived cell={new_cell}")
+        
+        self.crafter.update(dt)
+
+    def set_current_area_name(self, cell: Cell) -> None:
+        # TODO: sacar de move la posicion y con la posicion el nombre del area.
+        current_areas = self.area_mgr.areas_for_cell(cell)
+        if current_areas:
+            self._current_area_name = current_areas[0]
+        else:
+            self._current_area_name = "World"
+    
+    # util para el crafter
+    @property
+    def current_area_name(self) -> str | None:
+        return self._current_area_name

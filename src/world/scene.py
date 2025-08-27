@@ -17,11 +17,11 @@ from __future__ import annotations
 import arcade
 
 from src.utils.loader import load_world_from_json
+from src.utils.logger import get_logger
 from src.world.settings import SETTINGS
 from src.world.grid import to_cell, to_world
 from src.world.pathfinding import GridSpec
 from src.agent.npc_game import NPCAgent
-from src.utils.logger import get_logger
 
 
 class GameWindow(arcade.Window):
@@ -50,12 +50,13 @@ class GameWindow(arcade.Window):
 
         # --- objetos/NPCs
         from src.world.items import ObjectManager
+        from src.world.areas import AreaManager
         self.objects = ObjectManager()
         self.npcs: list[NPCAgent] = []
 
         if config_path:
             # factory de NPC para el loader (inyecta grid_spec, grid_size y speed)
-            def make_npc(cfg: dict) -> NPCAgent:
+            def make_npc(cfg: dict, om: ObjectManager, am: AreaManager) -> NPCAgent:
                 speed = float(cfg.get("speed", 4.0))
                 cell = tuple(cfg["cell"])
                 npc = NPCAgent(
@@ -97,7 +98,7 @@ class GameWindow(arcade.Window):
         self.blocked_sprites = arcade.SpriteList(use_spatial_hash=True)
         for (cx, cy) in self.blocked_cells:
             x, y = to_world((cx, cy), self.g)
-            s = arcade.SpriteSolidColor(self.g, self.g, arcade.color.DARK_BROWN)
+            s = arcade.SpriteSolidColor(self.g, self.g, arcade.color.BLACK)  # ← negro
             s.center_x, s.center_y = x, y
             self.blocked_sprites.append(s)
     

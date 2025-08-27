@@ -58,25 +58,30 @@ def load_world_from_json(
             object_mgr.add(_item_from_cfg(item_cfg))
         except Exception as e:
             log.warning(f"Item inválido {item_cfg!r}: {e}")
+    
+    # 3) Areas
+    areas_cfg = data.get("areas", [])
+    areas = [AreaFactory.from_json(a) for a in areas_cfg]
+    area_mgr = AreaManager(areas)
 
-    # 3) npcs (vía factory del llamador)
+    # 4) npcs (vía factory del llamador)
     npcs = []
     for npc_cfg in data.get("npcs", []):
         if "id" not in npc_cfg or "cell" not in npc_cfg:
             log.warning(f"NPC inválido (faltan 'id' o 'cell'): {npc_cfg!r}")
             continue
         try:
-            npc = npc_factory(npc_cfg)
+            npc = npc_factory(npc_cfg, object_mgr, area_mgr)
             npcs.append(npc)
         except Exception as e:
             log.warning(f"No se pudo crear NPC {npc_cfg.get('id')!r}: {e}")
 
     log.info(f"load_ok blocked={len(blocked_cells)} items={len(object_mgr.all())} npcs={len(npcs)} from={p}")
 
-    # 4) Areas
-    areas_cfg = data.get("areas", [])
-    areas = [AreaFactory.from_json(a) for a in areas_cfg]
-    area_mgr = AreaManager(areas)
+
+    blocked_cells |= area_mgr.perimeter_blocked_cells()
+
+    log.info(f"Cargadas {len(areas)} áreas: {[a.id for a in areas]}") if areas else log.info("No se definieron áreas en el JSON")
 
     if areas:
         log.info(f"Cargadas {len(areas)} áreas: {[a.id for a in areas]}")
