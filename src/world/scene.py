@@ -50,7 +50,7 @@ class GameWindow(arcade.Window):
 
         # --- objetos/NPCs
         from src.world.items import ObjectManager
-        from src.world.areas import AreaManager
+        from src.world.areas.areas import AreaManager
         self.objects = ObjectManager()
         self.npcs: list[NPCAgent] = []
 
@@ -65,6 +65,8 @@ class GameWindow(arcade.Window):
                     grid_spec_provider=grid_spec,
                     speed_cells_per_sec=speed,
                     initial_cell=tuple(cell),  # type: ignore
+                    object_mgr=om,
+                    area_mgr=am,
                 )
                 return npc
 

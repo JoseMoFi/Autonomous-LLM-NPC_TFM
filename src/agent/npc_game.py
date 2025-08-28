@@ -7,10 +7,10 @@ from src.world.pathfinding import GridSpec, astar
 from src.world.movement import GridMover
 from src.world.recipe import RecipeRegistry
 from src.world.items import ObjectManager
-from src.world.areas import AreaManager
+from src.world.areas.areas import AreaManager
 from src.utils.logger import get_logger
-from agent.inventory import Inventory
-from agent.crafting import Crafter, CraftError
+from src.agent.inventory import Inventory
+from src.agent.crafting import Crafter
 
 
 class NPCAgent:
@@ -40,6 +40,8 @@ class NPCAgent:
 
         self.object_mgr = object_mgr
         self.area_mgr = area_mgr
+
+        self._current_area_name: str | None = None
 
         self.log_file = f"logs/agents/{agent_id}.log"
         self.log = get_logger(f"agent.{agent_id}", self.log_file)
@@ -107,7 +109,7 @@ class NPCAgent:
         new_target = self.mover.target_cell()
 
         if prev_cell != new_cell:
-            self.set_current_area_name
+            self.set_current_area_name(new_cell)
 
         # log cuando avanza de celda
         if new_cell != prev_cell:
@@ -121,12 +123,8 @@ class NPCAgent:
         self.crafter.update(dt)
 
     def set_current_area_name(self, cell: Cell) -> None:
-        # TODO: sacar de move la posicion y con la posicion el nombre del area.
-        current_areas = self.area_mgr.areas_for_cell(cell)
-        if current_areas:
-            self._current_area_name = current_areas[0]
-        else:
-            self._current_area_name = "World"
+        a = self.area_mgr.area_at(cell)
+        self._current_area_name = type(a).__name__ if a else "BaseArea"
     
     # util para el crafter
     @property

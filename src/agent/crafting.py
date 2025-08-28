@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Tuple
 
-from world.recipes import RecipeRegistry, Recipe
+from world.recipe import RecipeRegistry, Recipe
 from agent.inventory import Inventory
 
 class CraftError(Enum):

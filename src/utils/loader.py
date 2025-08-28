@@ -4,10 +4,12 @@ from pathlib import Path
 from typing import Callable, Iterable, Any
 
 import json
+from typing import Any, Dict, List, Tuple
 
 from src.utils.logger import get_logger
 from src.world.items import ObjectManager, Gem, Shard, Relic, WorldObject
-from src.world.areas import AreaFactory, AreaManager
+from src.world.areas.areas import AreaFactory, AreaManager
+from src.world.areas.areas_helper import _build_area
 
 log = get_logger("world.loader")
 
@@ -30,6 +32,22 @@ def _item_from_cfg(cfg: dict) -> WorldObject:
     if t == "relic":
         return Relic(cell)
     raise ValueError(f"Tipo de item desconocido: {t!r}")
+
+# ---- Area Loader ----
+
+def load_areas(area_specs: List[Dict[str, Any]]) -> AreaManager:
+    """
+    Crea un AreaManager con índice O(1) a partir de la lista de specs del JSON.
+    """
+    areas_dict: Dict[str, Any] = {}
+    for spec in area_specs or []:
+        area = _build_area(spec)
+        if area.id in areas_dict:
+            raise ValueError(f"Área duplicada en JSON: {area.id}")
+        areas_dict[area.id] = area
+
+    am = AreaManager(areas_dict)  # dict id->area
+    return am
 
 # ---- API pública ----
 
@@ -61,8 +79,7 @@ def load_world_from_json(
     
     # 3) Areas
     areas_cfg = data.get("areas", [])
-    areas = [AreaFactory.from_json(a) for a in areas_cfg]
-    area_mgr = AreaManager(areas)
+    area_mgr = load_areas(areas_cfg)
 
     # 4) npcs (vía factory del llamador)
     npcs = []
@@ -78,13 +95,10 @@ def load_world_from_json(
 
     log.info(f"load_ok blocked={len(blocked_cells)} items={len(object_mgr.all())} npcs={len(npcs)} from={p}")
 
-
     blocked_cells |= area_mgr.perimeter_blocked_cells()
 
-    log.info(f"Cargadas {len(areas)} áreas: {[a.id for a in areas]}") if areas else log.info("No se definieron áreas en el JSON")
-
-    if areas:
-        log.info(f"Cargadas {len(areas)} áreas: {[a.id for a in areas]}")
+    if len(area_mgr):
+        log.info(f"Cargadas {len(area_mgr)} áreas: {[a.id for a in area_mgr.areas]}")
     else:
         log.info("No se definieron áreas en el JSON")
 

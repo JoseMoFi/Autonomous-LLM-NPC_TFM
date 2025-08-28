@@ -1,12 +1,39 @@
 # src/world/areas.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Iterable, Dict, Type
+from typing import List, Tuple, Optional, Iterable, Dict, Type, Set
 
 from src.world.settings import SETTINGS
 
 Cell = Tuple[int, int]
 Rect = Tuple[int, int, int, int]  # (x1, y1, x2, y2) inclusivo
+
+CellKey = Tuple[int, int]
+
+def _cell_key(cell) -> CellKey:
+    """Acepta tuplas/listas (cx,cy) o objetos con .x/.y."""
+    try:
+        return int(cell[0]), int(cell[1])
+    except Exception:
+        return int(getattr(cell, "x")), int(getattr(cell, "y"))
+
+
+def _rect_bounds(rect) -> Tuple[int, int, int, int]:
+    """
+    Extrae (l,b,r,t). Asume rects 'exclusivos' en r,t (range(l,r), range(b,t)).
+    Si tus rects son inclusivos, cambia a r+=1, t+=1 al indexar.
+    """
+    if isinstance(rect, (tuple, list)) and len(rect) == 4:
+        l, b, r, t = rect
+        return int(l), int(b), int(r), int(t)
+    # soporte de dataclass/objeto: left/right/bottom/top o l/r/b/t
+    names = ("left", "bottom", "right", "top")
+    if all(hasattr(rect, n) for n in names):
+        return int(rect.left), int(rect.bottom), int(rect.right), int(rect.top)
+    alt = ("l", "b", "r", "t")
+    if all(hasattr(rect, n) for n in alt):
+        return int(rect.l), int(rect.b), int(rect.r), int(rect.t)
+    raise TypeError(f"Rect desconocido: {rect!r}")
 
 CELL_SIZE = SETTINGS.GRID_SIZE
 
@@ -146,45 +173,6 @@ class RectArea:
         # Etiqueta (cacheada)
         self._get_label(arcade, cell_px).draw()
 
-# -----------------------
-# Subclases tipadas
-# -----------------------
-
-class BakeryArea(RectArea):
-    KIND = "bakery"
-    STYLE = AreaStyle(
-        fill_rgb=(255, 165, 0),      # naranja suave
-        border_rgb=(200, 120, 0),
-        fill_alpha=50,
-        border_alpha=200,
-        border_px=2,
-        label_color=(0, 0, 0),
-        label_px=CELL_SIZE,
-    )
-
-class BarArea(RectArea):
-    KIND = "bar"
-    STYLE = AreaStyle(
-        fill_rgb=(90, 200, 255),     # azul claro
-        border_rgb=(20, 120, 200),
-        fill_alpha=50,
-        border_alpha=200,
-        border_px=2,
-        label_color=(0, 0, 0),
-        label_px=CELL_SIZE,
-    )
-
-class FarmArea(RectArea):  # cultivo
-    KIND = "farm"
-    STYLE = AreaStyle(
-        fill_rgb=(140, 220, 120),    # verde suave
-        border_rgb=(60, 140, 60),
-        fill_alpha=50,
-        border_alpha=200,
-        border_px=2,
-        label_color=(0, 0, 0),
-        label_px=CELL_SIZE,
-    )
 
 # ---------------------------------
 # Factory y Manager
@@ -214,39 +202,87 @@ class AreaFactory:
         return cls(area_id=area_id, rects=rects, entrances=entrances, anchor=anchor)
 
 class AreaManager:
-    def __init__(self, areas: List[RectArea]) -> None:
-        self._areas: Dict[str, RectArea] = {a.id: a for a in areas}
-        self._by_kind: Dict[str, List[str]] = {}
-        for a in areas:
-            self._by_kind.setdefault(a.kind, []).append(a.id)
+    """
+    Gestiona áreas y ofrece consultas O(1) por celda.
+    - _areas: dict id->area (mantiene tu API draw_all/perimeter_blocked_cells)
+    - _cell_to_areas: (cx,cy) -> [area_id,...] (última insertada tiene prioridad)
+    - _perimeter_cache: set[Cell] (se invalida al mutar)
+    """
 
-    # queries
-    def area(self, area_id: str) -> RectArea:
-        return self._areas[area_id]
+    def __init__(self, areas: Optional[Dict[str, "BaseArea"]] = None):
+        self._areas: Dict[str, "BaseArea"] = dict(areas or {})
+        self._cell_to_areas: Dict[CellKey, List[str]] = {}
+        self._perimeter_cache: Optional[Set["Cell"]] = None
+        self._build_index()
 
-    def try_area(self, area_id: str) -> Optional[RectArea]:
+    # ---------- índice interno ----------
+    def _build_index(self) -> None:
+        self._cell_to_areas.clear()
+        for a in self._areas.values():
+            self._index_area(a)
+
+    def _index_area(self, area: "BaseArea") -> None:
+        for rect in getattr(area, "rects", []):
+            l, b, r, t = _rect_bounds(rect)
+            # Si tus rectángulos son inclusivos en r,t cambia: range(l, r+1) / range(b, t+1)
+            for cx in range(l, r):
+                for cy in range(b, t):
+                    self._cell_to_areas.setdefault((cx, cy), []).append(area.id)
+
+    # ---------- mutación ----------
+    def add(self, area: "BaseArea") -> None:
+        assert area.id not in self._areas, f"Área duplicada: {area.id}"
+        self._areas[area.id] = area
+        self._index_area(area)
+        self._perimeter_cache = None  # invalida cache
+
+    def remove(self, area_id: str) -> None:
+        if self._areas.pop(area_id, None) is None:
+            return
+        # Reconstrucción completa para mantener el índice correcto y simple
+        self._build_index()
+        self._perimeter_cache = None
+
+    def rebuild_index(self) -> None:
+        """Llama si cambias 'rects' de alguna área en caliente."""
+        self._build_index()
+        self._perimeter_cache = None
+
+    # ---------- consultas O(1) ----------
+    def areas_for_cell(self, cell) -> List[str]:
+        """Devuelve ids de áreas que contienen la celda (puede haber solapes)."""
+        return list(self._cell_to_areas.get(_cell_key(cell), []))
+
+    def area_at(self, cell) -> Optional["BaseArea"]:
+        """Área 'principal' en la celda; política: la última insertada gana en solape."""
+        ids = self._cell_to_areas.get(_cell_key(cell))
+        if not ids:
+            return None
+        return self._areas[ids[-1]]
+
+    def area(self, area_id: str) -> Optional["BaseArea"]:
         return self._areas.get(area_id)
 
-    def areas_for_cell(self, cell: Cell) -> List[str]:
-        return [a.id for a in self._areas.values() if a.contains(cell)]
+    def all(self) -> List["BaseArea"]:
+        return list(self._areas.values())
 
-    def by_kind(self, kind: str) -> List[str]:
-        return self._by_kind.get(kind, [])
+    # Compat si en algún sitio usas .areas()
+    def areas(self) -> Iterable["BaseArea"]:
+        return self._areas.values()
 
-    def all_ids(self) -> List[str]:
-        return list(self._areas.keys())
-
-    def __len__(self) -> int:
-        return len(self._areas)
-
-    # dibujo (centralizado aquí para no ensuciar scene)
+    # ---------- utilidades existentes ----------
     def draw_all(self, arcade, cell_px: int) -> None:
         for a in self._areas.values():
             a.draw(arcade, cell_px)
+
+    def perimeter_blocked_cells(self) -> Set["Cell"]:
+        if self._perimeter_cache is None:
+            out: Set["Cell"] = set()
+            for a in self._areas.values():
+                out.update(a.perimeter_block_cells())
+            self._perimeter_cache = out
+        # devuelve una copia para evitar mutaciones externas del cache
+        return set(self._perimeter_cache)
     
-    # NUEVO: celdas bloqueadas de perímetro (union de todas las áreas)
-    def perimeter_blocked_cells(self) -> set[Cell]:
-        out: set[Cell] = set()
-        for a in self._areas.values():
-            out.update(a.perimeter_block_cells())
-        return out
+    def __len__(self):
+        return len(self.all())
