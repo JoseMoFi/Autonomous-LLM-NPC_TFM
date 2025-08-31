@@ -80,11 +80,6 @@ def load_world_from_json(
         cell = (int(cx), int(cy))  # tupla nativa, NO Cell(...)
         obj = make_item(t, cell)
         object_mgr.add(obj)
-    # for item_cfg in data.get("items", []):
-    #     try:
-    #         object_mgr.add(_item_from_cfg(item_cfg))
-    #     except Exception as e:
-    #         log.warning(f"Item inválido {item_cfg!r}: {e}")
     
     # 3) Areas
     areas_cfg = data.get("areas", [])

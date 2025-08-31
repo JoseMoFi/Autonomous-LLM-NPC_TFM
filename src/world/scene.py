@@ -77,11 +77,15 @@ class GameWindow(arcade.Window):
             self.area_mgr = am
 
             self.show_areas = True
+
+            self.objects.set_world_blocked = self.blocked_cells
+
         else:
             # fallback: tu setup anterior (1 NPC e items demo)
             from src.world.items import Gem, Shard, Relic
             self.objects.add(Gem((5, 5)), Shard((7, 8)), Relic((12, 6)))
             self.npcs = [NPCAgent("eldric", self.g, grid_spec, 6.0, (2, 3))]
+        
 
         # reconstruye sprites de bloqueos en cualquier caso
         self._rebuild_blocked_sprites()

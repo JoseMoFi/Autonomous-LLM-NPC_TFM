@@ -73,29 +73,34 @@ from src.world.items_type import *
 
 from src.world.grid import neighbors_4  # ya lo tienes
 
+class ItemErrorTypes:
+    NO_ITEM: str = "ERROR_ITEM"
+    BLOCKED_CELL: str = "BLOQUED_CELL"
+    NO_MATCHING_TYPE: str = "NO_MATCHING_TYPE"
+    OCCUPIED_CELL: str = "OCCUPIED_CELL"
+    OBJ_NOT_FOUND: str = "OBJ_NOT_FOUND"
+    QTY_GT1_SINGLE_CELL: str = "QTY_GT1_SINGLE_CELL"
+
+
+
 class ObjectManager:
     def __init__(self) -> None:
-        self._objects: list[WorldObject] = []
-        self._occupied: set[Cell] = set()  # celdas con objeto EN EL SUELO
+        self._objects: dict[str, WorldObject] = {}
+        # self._objects: list[WorldObject] = []
+        self.obj_by_cell: dict[Cell, str] = {}  # celdas con objeto EN EL SUELO
+        self._object_npc: dict[str, str] = {}
+        self.world_blocked: set[Cell] = set()
 
-    # --- internos ---
-    def _rebuild_occupancy(self) -> None:
-        self._occupied = {o.cell for o in self._objects if o.held_by is None}
+    # ---- helpers ----
+    def _is_occupied(self, cell: Cell) -> bool:
+        return cell in self.obj_by_cell
 
-    def _mark_add(self, obj: WorldObject) -> None:
-        if obj.held_by is None:
-            if obj.cell in self._occupied:
-                raise ValueError(f"Ya hay un objeto en {obj.cell}")
-            self._occupied.add(obj.cell)
+    def set_world_blocked(self, world_blocked: set[Cell]) -> None:
+        self.world_blocked |= world_blocked
 
-    def _mark_remove(self, obj: WorldObject) -> None:
-        if obj.held_by is None:
-            self._occupied.discard(obj.cell)
-
-    # --- API ---
     def add(self, *objs: WorldObject) -> None:
         for o in objs:
-            self._objects.append(o)
+            self._objects[o.id] = o
             self._mark_add(o)
 
     def remove(self, obj: WorldObject) -> None:
@@ -106,52 +111,156 @@ class ObjectManager:
         return list(self._objects)
 
     def draw(self, grid_size: int) -> None:
-        for o in self._objects:
+        for o in self._objects.values():
             o.draw(grid_size)
 
-    def objects_at_cell(self, cell: Cell) -> list[WorldObject]:
-        return [o for o in self._objects if o.held_by is None and o.cell == cell]
+    def _mark_add(self, obj: WorldObject) -> None:
+        if obj.held_by is None:
+            if obj.cell in self.obj_by_cell:
+                raise ValueError(f"Ya hay un objeto en {obj.cell}")
+            self.obj_by_cell[obj.cell] = obj.id
 
-    def is_free(self, cell: Cell) -> bool:
-        return cell not in self._occupied
+    def _mark_remove(self, obj: WorldObject) -> None:
+        if obj.held_by is None:
+            self.obj_by_cell.remove(obj.cell)
 
-    # --- reglas pedidas ---
-    def pickable_near(self, agent_cell: Cell) -> list[WorldObject]:
-        """Objetos cogibles en misma celda o adyacentes 4-dir."""
-        cands: list[WorldObject] = []
-        scan = [agent_cell, *neighbors_4(agent_cell)]
-        for c in scan:
-            for o in self._objects:
-                if o.held_by is None and o.cell == c:
-                    cands.append(o)
-        return cands
+    
+    # ---- consultas ----
+    def objects_at(self, cell: Cell) -> list[str]:
+        oid = self.obj_by_cell.get(cell)
+        return [oid] if oid else []
 
-    def pick_up_near(self, agent_id: str, agent_cell: Cell) -> bool:
-        """Intenta coger el primero disponible en radio 4-dir (incluida la celda)."""
-        for o in self.pickable_near(agent_cell):
-            if o.pick_up(agent_id):
-                # sale del suelo -> libera su celda
-                self._occupied.discard(o.cell)
-                return True
-        return False
+    def get_obj(self, obj_id: str) -> WorldObject | None:
+        return self.objects.get(obj_id)
 
-    def drop_held(self, agent_id: str, cell: Cell) -> bool:
-        """
-        Suelta la PRIMERA pieza que lleve el agente en 'cell' si esa celda está libre.
-        """
-        if not self.is_free(cell):
-            # ya hay pieza en esa celda
-            get_logger("world.objects").info(f"drop_blocked agent={agent_id} cell={cell}")
-            return False
-        for o in self._objects:
-            if o.held_by == agent_id:
-                o.held_by = None
-                o.cell = cell
-                self._occupied.add(cell)
-                get_logger("world.objects").info(f"drop_ok id={o.id} agent={agent_id} cell={cell}")
-                return True
-        return False
+    # ---- validación ----
+    def can_pick(self, *, cell: Cell, type_filter: str | None = None)-> Tuple[bool, str, str]: # Return: accessible, Error Type, object id.
+        oid = self.obj_by_cell.get(cell)
+        if not oid:
+            return False, ItemErrorTypes.NO_ITEM, None
+        if type_filter is None:
+            return True, None, oid
+        obj = self.objects.get(oid)
+        return (True, None, oid) if (obj and obj.name == type_filter) else (False, ItemErrorTypes.NO_MATCHING_TYPE, None)
 
-    # utilidad por si tocas estados a mano
-    def sync(self) -> None:
-        self._rebuild_occupancy()
+    def can_drop(self, *, cell: Cell) -> Tuple[bool, str]: # Return: accesible, Error type
+        if cell in self.world_blocked:
+            return False, ItemErrorTypes.BLOCKED_CELL
+        if cell in self.obj_by_cell:
+            return False, ItemErrorTypes.OCCUPIED_CELL
+        return True, None
+
+    # ---- commits (1 por celda) ----
+    def commit_pick(self, *, agent_id: str, obj_id: str) -> Tuple[bool, str, str]: # Return: accessible, Error Type, object name.
+        obj = self.objects.get(obj_id)
+        if not obj:
+            return False, ItemErrorTypes.OBJ_NOT_FOUND, None
+        self.obj_by_cell.pop(obj.cell, None)
+        self.objects.pop(obj_id, None)
+        # emitir eventos / actualizar ledger si tienes
+        return True, None, obj.name
+    
+    def commit_drop(self, *, agent_id: str, cell: Cell, item_type: str, qty: int = 1) -> Tuple[bool, str, List[str]]:
+        if qty != 1:
+            return False, ItemErrorTypes.QTY_GT1_SINGLE_CELL, []
+        ok, reason = self.can_drop(cell=cell)
+        if not ok:
+            return False, reason, []
+        obj = make_item(item_type, cell)
+        obj_id = getattr(obj, "id", None) or f"obj_{len(self.objects)+1}"
+        obj.id = obj_id
+        self.objects[obj_id] = obj
+        self.obj_by_cell[cell] = obj_id
+        # emitir eventos / actualizar ledger si tienes
+        return True, None, [obj_id]
+    # ---- craft commit ----
+    def commit_craft(self,item_type: str):
+        pass
+
+    # opcional: para el loader/editor
+    def spawn(self, item_type: str, cell: Cell) -> str: # Return Object ID
+        if self._is_occupied(cell):
+            raise ValueError(f"{ItemErrorTypes.OCCUPIED_CELL} {cell}")
+        obj = make_item(item_type, cell)
+        obj_id = getattr(obj, "id", None) or f"obj_{len(self.objects)+1}"
+        obj.id = obj_id
+        self.objects[obj_id] = obj
+        self.obj_by_cell[cell] = obj_id
+        return obj_id
+    # # --- internos ---
+    # def _rebuild_occupancy(self) -> None:
+    #     self._occupied = {o.cell for o in self._objects if o.held_by is None}
+
+    # def _mark_add(self, obj: WorldObject) -> None:
+    #     if obj.held_by is None:
+    #         if obj.cell in self._occupied:
+    #             raise ValueError(f"Ya hay un objeto en {obj.cell}")
+    #         self._occupied.add(obj.cell)
+
+    # def _mark_remove(self, obj: WorldObject) -> None:
+    #     if obj.held_by is None:
+    #         self._occupied.discard(obj.cell)
+
+    # # --- API ---
+    # def add(self, *objs: WorldObject) -> None:
+    #     for o in objs:
+    #         self._objects.append(o)
+    #         self._mark_add(o)
+
+    # def remove(self, obj: WorldObject) -> None:
+    #     self._mark_remove(obj)
+    #     self._objects = [o for o in self._objects if o is not obj]
+
+    # def all(self) -> list[WorldObject]:
+    #     return list(self._objects)
+
+    # def draw(self, grid_size: int) -> None:
+    #     for o in self._objects:
+    #         o.draw(grid_size)
+
+    # def objects_at_cell(self, cell: Cell) -> list[WorldObject]:
+    #     return [o for o in self._objects if o.held_by is None and o.cell == cell]
+
+    # def is_free(self, cell: Cell) -> bool:
+    #     return cell not in self._occupied
+
+    # # --- reglas pedidas ---
+    # def pickable_near(self, agent_cell: Cell) -> list[WorldObject]:
+    #     """Objetos cogibles en misma celda o adyacentes 4-dir."""
+    #     cands: list[WorldObject] = []
+    #     scan = [agent_cell, *neighbors_4(agent_cell)]
+    #     for c in scan:
+    #         for o in self._objects:
+    #             if o.held_by is None and o.cell == c:
+    #                 cands.append(o)
+    #     return cands
+
+    # def pick_up_near(self, agent_id: str, agent_cell: Cell) -> bool:
+    #     """Intenta coger el primero disponible en radio 4-dir (incluida la celda)."""
+    #     for o in self.pickable_near(agent_cell):
+    #         if o.pick_up(agent_id):
+    #             # sale del suelo -> libera su celda
+    #             self._occupied.discard(o.cell)
+    #             return True
+    #     return False
+
+    # def drop_held(self, agent_id: str, cell: Cell) -> bool:
+    #     """
+    #     Suelta la PRIMERA pieza que lleve el agente en 'cell' si esa celda está libre.
+    #     """
+    #     if not self.is_free(cell):
+    #         # ya hay pieza en esa celda
+    #         get_logger("world.objects").info(f"drop_blocked agent={agent_id} cell={cell}")
+    #         return False
+    #     for o in self._objects:
+    #         if o.held_by == agent_id:
+    #             o.held_by = None
+    #             o.cell = cell
+    #             self._occupied.add(cell)
+    #             get_logger("world.objects").info(f"drop_ok id={o.id} agent={agent_id} cell={cell}")
+    #             return True
+    #     return False
+
+    # # utilidad por si tocas estados a mano
+    # def sync(self) -> None:
+    #     self._rebuild_occupancy()

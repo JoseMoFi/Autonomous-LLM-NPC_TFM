@@ -122,6 +122,86 @@ class NPCAgent:
         
         self.crafter.update(dt)
 
+    # Object manage
+    # --- helper de proximidad Manhattan (igual celda o adyacente) ---
+    def _is_adjacent4_or_same(self, a: Cell, b: Cell) -> bool:
+        return abs(a[0] - b[0]) + abs(a[1] - b[1]) <= 1
+    
+    # ========== ACTION: PICK ==========
+    def pick_from_ground(self, cell: Cell, type_filter: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        El NPC decide y ejecuta: coge 1 objeto de 'cell'.
+        Flujo: valida distancia -> OM.can_pick -> inventory.add -> OM.commit_pick.
+        Devuelve (ok, reason, item_type).
+        """
+        here = self.current_cell()
+        if not self._is_adjacent4_or_same(here, cell):
+            return False, "TOO_FAR", None
+
+        ok, reason, obj_id = self.object_mgr.can_pick(cell=cell, type_filter=type_filter)
+        if not ok or not obj_id:
+            return False, reason, None
+
+        # averigua el tipo antes del commit
+        obj = self.object_mgr.get_obj(obj_id)
+        item_type = getattr(obj, "name", None) if obj else None
+        if not item_type:
+            return False, "OBJ_INVALID", None
+
+        # aplica inventario local (agente)
+        self.inventory.add({item_type: 1})
+
+        # commit al OM
+        ok2, reason2, _ = self.object_mgr.commit_pick(agent_id=self.agent_id, obj_id=obj_id)
+        if not ok2:
+            # rollback simple por seguridad
+            self.inventory.remove({item_type: 1})
+            return False, f"COMMIT_FAIL:{reason2}", None
+
+        # log opcional
+        if hasattr(self, "logger"):
+            self.logger.info(f"action=pick item={item_type} cell={cell}")
+
+        return True, None, item_type
+
+    # ========== ACTION: DROP ==========
+    def drop_to_ground(self, item_type: str, qty: int, cell: Cell) -> Tuple[bool, Optional[str], int]:
+        """
+        El NPC decide y ejecuta: suelta 'qty' unidades en 'cell'.
+        Flujo: valida distancia+stock -> OM.can_drop -> inventory.remove -> OM.commit_drop.
+        Devuelve (ok, reason, created_count).
+        """
+        here = self.current_cell()
+        if not self._is_adjacent4_or_same(here, cell):
+            return False, "TOO_FAR", 0
+
+        qty = int(qty)
+        if qty <= 0:
+            return False, "INVALID_QTY", 0
+
+        if self.inventory.count(item_type) < qty:
+            return False, "NO_STOCK", 0
+
+        ok, reason = self.object_mgr.can_drop(cell=cell)
+        if not ok:
+            return False, reason, 0
+
+        # aplica inventario local
+        if not self.inventory.remove({item_type: qty}):
+            return False, "INV_REMOVE_FAIL", 0
+
+        # commit al OM
+        ok2, reason2, created_ids = self.object_mgr.commit_drop(agent_id=self.agent_id, cell=cell, item_type=item_type, qty=qty)
+        if not ok2:
+            # rollback simple por seguridad
+            self.inventory.add({item_type: qty})
+            return False, f"COMMIT_FAIL:{reason2}", 0
+
+        if hasattr(self, "logger"):
+            self.logger.info(f"action=drop item={item_type} qty={qty} cell={cell}")
+
+        return True, None, len(created_ids)
+
     def set_current_area_name(self, cell: Cell) -> None:
         a = self.area_mgr.area_at(cell)
         self._current_area_name = type(a).__name__ if a else None
