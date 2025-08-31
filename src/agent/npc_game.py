@@ -124,7 +124,7 @@ class NPCAgent:
 
     def set_current_area_name(self, cell: Cell) -> None:
         a = self.area_mgr.area_at(cell)
-        self._current_area_name = type(a).__name__ if a else "BaseArea"
+        self._current_area_name = type(a).__name__ if a else None
     
     # util para el crafter
     @property

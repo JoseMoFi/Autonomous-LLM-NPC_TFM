@@ -9,8 +9,8 @@ from src.world.grid import Cell
 def _cell(obj: Any) -> Cell:
     # admite [x,y] o {"x":..,"y":..}
     if isinstance(obj, (tuple, list)) and len(obj) == 2:
-        return Cell(int(obj[0]), int(obj[1]))
-    return Cell(int(obj["x"]), int(obj["y"]))
+        return (int(obj[0]), int(obj[1]))
+    return (int(obj["x"]), int(obj["y"]))
 
 def _rect(obj: Any) -> Tuple[int, int, int, int]:
     """
@@ -67,15 +67,15 @@ def _build_area(area_spec: Dict[str, Any]):
     if not entrances:
         # opcional: intenta poner una entrada por defecto en el borde inferior izquierdo
         l, b, r, t = rects[0]
-        entrances = [Cell(l, (b + t) // 2)]
+        entrances = [Cell(int(l), int(b + t) // 2)]
 
     if "anchor" in area_spec:
         anchor = _cell(area_spec["anchor"])
     else:
         # anchor por defecto: primera celda dentro del primer rect
         l, b, r, t = rects[0]
-        anchor = Cell(l, b)
+        anchor = Cell(int(l), int(b))
 
     # Las clases de área del repo aceptan: id, rects, entrances, anchor
-    area = cls(id=a_id, rects=rects, entrances=entrances, anchor=anchor)
+    area = cls(area_id=a_id, rects=rects, entrances=entrances, anchor=anchor)
     return area

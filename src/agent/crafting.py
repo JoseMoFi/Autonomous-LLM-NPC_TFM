@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Tuple
 
-from world.recipe import RecipeRegistry, Recipe
-from agent.inventory import Inventory
+from src.world.recipe import RecipeRegistry, Recipe
+from src.agent.inventory import Inventory
 
 class CraftError(Enum):
     UNKNOWN_RECIPE = auto()

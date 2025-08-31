@@ -5,7 +5,7 @@ import itertools
 
 import arcade
 
-from src.world.grid import to_world
+from src.world.grid import to_world, Cell
 from src.utils.logger import get_logger
 
 Cell = Tuple[int, int]
@@ -66,19 +66,7 @@ class WorldObject:
 
 # --- Tipos concretos (3 por ahora) ---
 
-class Gem(WorldObject):
-    def __init__(self, cell: Cell):
-        super().__init__(cell=cell, color=arcade.color.AQUAMARINE, name="gem")
-
-
-class Shard(WorldObject):
-    def __init__(self, cell: Cell):
-        super().__init__(cell=cell, color=arcade.color.GOLD, name="shard")
-
-
-class Relic(WorldObject):
-    def __init__(self, cell: Cell):
-        super().__init__(cell=cell, color=arcade.color.MAGENTA, name="relic")
+from src.world.items_type import *
 
 
 # --- Gestor simple de objetos ---

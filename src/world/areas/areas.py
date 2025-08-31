@@ -81,7 +81,7 @@ class RectArea:
     KIND: str = "area"
     STYLE: AreaStyle = AreaStyle((180, 180, 180), (120, 120, 120))
 
-    __slots__ = ("id", "kind", "rects", "entrances", "anchor")
+    __slots__ = ("id", "kind", "rects", "entrances", "anchor", "_label_cache")
 
     def __init__(
         self,
@@ -148,6 +148,20 @@ class RectArea:
         for x1, y1, x2, y2 in self.rects:
             xs1.append(x1); ys1.append(y1); xs2.append(x2); ys2.append(y2)
         return (min(xs1), min(ys1), max(xs2), max(ys2))
+    
+    def _bbox_center_cell(self) -> Cell:
+        """
+            Celda central del bbox. Para r,t EXCLUSIVOS, la última celda válida es r-1,t-1.
+            Usamos floor para caer en una celda válida.
+        """
+        # Si tienes anchor definido y quieres priorizarlo para etiquetar:
+        if getattr(self, "anchor", None):
+            return self.anchor  # type: ignore[return-value]
+
+        l, b, r, t = self.bbox()
+        cx = (l + (r - 1)) // 2   # centro discreto en X
+        cy = (b + (t - 1)) // 2   # centro discreto en Y
+        return (int(cx), int(cy))
 
     # --- dibujo (sin contaminar scene) ---
 
@@ -177,7 +191,7 @@ class RectArea:
 # ---------------------------------
 # Factory y Manager
 # ---------------------------------
-
+from src.world.areas.areas_type import *
 _KIND_TO_CLASS: Dict[str, Type[RectArea]] = {
     BakeryArea.KIND: BakeryArea,
     BarArea.KIND:    BarArea,

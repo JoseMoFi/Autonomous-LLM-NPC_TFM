@@ -4,3 +4,5 @@ logs
 tests
 pytest.ini
 data/tmp
+links.txt
+notas.txt

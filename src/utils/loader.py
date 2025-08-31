@@ -7,7 +7,8 @@ import json
 from typing import Any, Dict, List, Tuple
 
 from src.utils.logger import get_logger
-from src.world.items import ObjectManager, Gem, Shard, Relic, WorldObject
+from src.world.items import ObjectManager, WorldObject
+from src.world.items_type import *
 from src.world.areas.areas import AreaFactory, AreaManager
 from src.world.areas.areas_helper import _build_area
 
@@ -22,16 +23,16 @@ def _as_cell(value: Any) -> tuple[int, int]:
         return int(value[0]), int(value[1])
     raise ValueError(f"Celda inválida: {value!r}")
 
-def _item_from_cfg(cfg: dict) -> WorldObject:
-    t = str(cfg.get("type", "")).lower().strip()
-    cell = _as_cell(cfg.get("cell"))
-    if t == "gem":
-        return Gem(cell)
-    if t == "shard":
-        return Shard(cell)
-    if t == "relic":
-        return Relic(cell)
-    raise ValueError(f"Tipo de item desconocido: {t!r}")
+# def _item_from_cfg(cfg: dict) -> WorldObject:
+#     t = str(cfg.get("type", "")).lower().strip()
+#     cell = _as_cell(cfg.get("cell"))
+#     if t == "gem":
+#         return Gem(cell)
+#     if t == "shard":
+#         return Shard(cell)
+#     if t == "relic":
+#         return Relic(cell)
+#     raise ValueError(f"Tipo de item desconocido: {t!r}")
 
 # ---- Area Loader ----
 
@@ -71,11 +72,19 @@ def load_world_from_json(
 
     # 2) items
     object_mgr = ObjectManager()
-    for item_cfg in data.get("items", []):
-        try:
-            object_mgr.add(_item_from_cfg(item_cfg))
-        except Exception as e:
-            log.warning(f"Item inválido {item_cfg!r}: {e}")
+
+    items_cfg = data.get("items", []) or []
+    for it in items_cfg:
+        t = str(it["type"]).lower()
+        cx, cy = it["cell"]  # asegúrate de que viene como [x,y]
+        cell = (int(cx), int(cy))  # tupla nativa, NO Cell(...)
+        obj = make_item(t, cell)
+        object_mgr.add(obj)
+    # for item_cfg in data.get("items", []):
+    #     try:
+    #         object_mgr.add(_item_from_cfg(item_cfg))
+    #     except Exception as e:
+    #         log.warning(f"Item inválido {item_cfg!r}: {e}")
     
     # 3) Areas
     areas_cfg = data.get("areas", [])
@@ -98,7 +107,7 @@ def load_world_from_json(
     blocked_cells |= area_mgr.perimeter_blocked_cells()
 
     if len(area_mgr):
-        log.info(f"Cargadas {len(area_mgr)} áreas: {[a.id for a in area_mgr.areas]}")
+        log.info(f"Cargadas {len(area_mgr)} áreas: {[a.id for a in area_mgr.areas()]}")
     else:
         log.info("No se definieron áreas en el JSON")
 
